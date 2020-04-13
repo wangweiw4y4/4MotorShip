@@ -1,6 +1,7 @@
 import ctypes
 from ctypes import *
 import numpy as np
+import math
 
 class StructPointer(Structure):
     """
@@ -71,7 +72,11 @@ if __name__ == '__main__':
         json.dump(state_list,file_obj)
 '''
 if __name__ == '__main__':
-    print(step([0.0008196163338093393, -0.0004120753615044266, 0.0, 0.016256858499762005, -0.008195974879498533, 0.0],[2,1,-1,-2]))
+    s = step([1.7374010205043304, 1.6136686929610684, 2.6266826787292694, -0.06877022018245621, -0.0031953394070718456, 5.732540683526411],[0.99852693, -9.626288, -8.389106, -10.0])
+    print(s)
+    v = math.sqrt(np.power(s[0],2) + np.power(s[1],2))/0.1
+    print(f'v:{v}')
+
 
 
 
