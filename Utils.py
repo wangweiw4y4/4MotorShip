@@ -1,16 +1,8 @@
 #!/usr/bin/env python
 # coding=utf-8
-"""
-@author: Jiawei Wu
-@create time: 2019-12-04 10:40
-@edit time: 2020-01-14 17:10
-@file: /exp_replay.py
-"""
 
 import torch
-from torch.autograd import Variable
 import numpy as np
-
 
 class ExpReplay:
     """
@@ -97,8 +89,8 @@ class ExpReplay:
         将batch按照s, a, r, d, s_的顺序分割好并返回
 
         @param batch_size: 一个batch的大小，若不指定则按经验回放池的默认值
-        @return cur_states, actions, rewards, dones, nexe_states: 
-            按照 (s, a, r, d, s_) 顺序分割好的一组batch 
+        @return cur_states, actions, rewards, dones, nexe_states:
+            按照 (s, a, r, d, s_) 顺序分割好的一组batch
         """
         batch = self.get_batch(batch_size)
         if batch is None:
@@ -118,8 +110,8 @@ class ExpReplay:
         @param CUDA: 是否使用GPU，这决定了返回变量的设备类型
         @param batch_size: 一个batch的大小，若不指定则按经验回放池的默认值
         @param dtype: 返回变量的数据类型，默认为Float
-        @return cur_states, actions, rewards, dones, nexe_states: 
-            按照 (s, a, r, d, s_) 顺序分割好且已经转为torch Variable的一组batch 
+        @return cur_states, actions, rewards, dones, nexe_states:
+            按照 (s, a, r, d, s_) 顺序分割好且已经转为torch Variable的一组batch
         """
         batch = self.get_batch_splited(batch_size)
         if batch is None:
@@ -127,21 +119,41 @@ class ExpReplay:
         else:
             return (torch.from_numpy(ndarray).type(dtype).cuda() for ndarray in batch) if CUDA else (torch.from_numpy(ndarray).type(dtype) for ndarray in batch)
 
+class NormalActionNoise(object):
 
-class OUProcess(object):
-    """Ornstein-Uhlenbeck process"""
-
-    def __init__(self, x_size, mu=0, theta=0.15, sigma=0.3):
-        self.x = np.ones(x_size) * mu
-        self.x_size = x_size
+    def __init__(self, mu, sigma):
         self.mu = mu
-        self.theta = theta
         self.sigma = sigma
 
-    def noise(self):
-        dx = self.theta * (self.mu - self.x) + self.sigma * np.random.randn(self.x_size)
-        self.x = self.x + dx
-        return self.x
+    def __call__(self):
+        return np.random.normal(self.mu, self.sigma)
+
+    def reset(self):
+        pass
+
+    def __repr__(self):
+        return 'NormalActionNoise(mu={}, sigma={})'.format(self.mu, self.sigma)
+
+class OUActionNoise(object):
+
+    def __init__(self, mu, sigma, theta=.15, dt=1e-2, x0=None):
+        self.theta = theta
+        self.mu = mu
+        self.sigma = sigma
+        self.dt = dt
+        self.x0 = x0
+        self.reset()
+
+    def __call__(self):
+        x = self.x_prev + self.theta * (self.mu - self.x_prev) * self.dt + self.sigma * np.sqrt(self.dt) * np.random.normal(size=self.mu.shape)
+        self.x_prev = x
+        return x
+
+    def reset(self):
+        self.x_prev = self.x0 if self.x0 is not None else np.zeros_like(self.mu)
+
+    def __repr__(self):
+        return 'OUActionNoise(mu={}, sigma={})'.format(self.mu, self.sigma)
 
 
 def soft_update(target, source, tau):

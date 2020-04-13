@@ -48,7 +48,6 @@ ret_pointer Sim::my_integrate(double * x, double time){
   // 返回结构体指针（而不是结构体）
   return p;
 }
-
 extern "C"
 {
   Sim obj;

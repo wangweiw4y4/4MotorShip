@@ -1,109 +1,87 @@
 #!/usr/bin/env python
 # coding=utf-8
 
-from asv_agent import DDPG
 from asv_env import ASVEnv
 import numpy as np
-import torch
-import json
+import time
+from asv_agent import DDPG
+import os
 
-def rl_loop(load_model_episode=0, save_model=True):
-    #ENV_NAME = 'ASV_LINE'
-    # RENDER = False
-    MAX_EPISODES = 40000
-    MAX_EP_STEPS = 300
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
-    LR_A = 0.0005
-    LR_C = 0.001
-    LR_SOFT_UPDATE = 0.005
-    GAMMA = 0.99
-    NOISE_VAR = 1.6
-    NOISE_DECAY = 0.995
-    MAX_MEM=10000
-    MIN_MEM=None
-    BATCH_SIZE=128
+class RandAgent():
+    def get_action_noise(self, s):
+        return np.array([10, 10]) + (np.random.random(2) - 0.5) * 5
 
-    MODEL_INTERVAL = 500
-    TRACE_INTERVAL = 50
-    REWARD_INTERVAL = 20
+MAX_EPISODE = 10000000
+MAX_DECAYEP = 1000
+MAX_STEP = 300
 
-    env = ASVEnv()
-    # env = gym.make(ENV_NAME)
-    # env = env.unwrapped
-    # env.seed(1)
-    s_dim = env.observation_space['shape']
-    a_dim = env.action_space['shape']
-    a_bound = env.action_space['high']
+LR_A = 0.0005
+LR_C = 0.001
 
-    ddpg = DDPG(s_dim, a_dim, a_bound, LR_A, LR_C, LR_SOFT_UPDATE, GAMMA, NOISE_VAR, 1, MAX_MEM, MIN_MEM, BATCH_SIZE)
-    
-    if load_model_episode != 0:
-        ddpg.load_model(load_model_episode)
+def rl_loop(need_load=True):
+    RENDER = False
 
-    ep_reward_log = []
-    ep_reward_tb = 0
-    best_ep_r = -500000
-    best_ep = 0
+    env = ASVEnv(target_trajectory='linear')
+    s_dim = env.observation_space.shape[0]
+    a_dim = env.action_space.shape[0]
+    a_bound = env.action_space.high[0]
 
-    for i in range(load_model_episode, MAX_EPISODES+load_model_episode):
-        s = env.reset()
-        ep_reward = 0
+    agent = DDPG(s_dim, a_dim, a_bound, lr_a=LR_A, lr_c=LR_C, MAX_MEM=10000, MIN_MEM=1000, BATCH_SIZE=128)
+    # agent = RandAgent()
+    if need_load:
+        START_EPISODE = agent.load()
+    else:
+        START_EPISODE = 0
 
-        for j in range(MAX_EP_STEPS):
-            # if RENDER:
-            #     env.render()
-            a, action_noise = ddpg.get_action_noise(s)
-            s_, r ,done = env.step(a)
-            ddpg.add_step(s, a, r, done, s_)
-            s = s_
-            error = s[1]-s[0]   # 得到的新状态s点和目标轨迹点的差
+    summary_writer = agent.get_summary_writer()
+    show_reward = 0
+    counter = 0
+    for e in range(START_EPISODE, MAX_EPISODE):
+        cur_state = env.reset()
+        cum_reward = 0
+        noise_decay_rate = max((MAX_DECAYEP - e) / MAX_DECAYEP, 0.1)
+        agent.build_noise(0, 1 * noise_decay_rate)  # 根据给定的均值和decay的方差，初始化噪声发生器
 
-            ep_reward += r
-            ep_reward_tb += r
-            # 每隔TRACE_INTERVAL局记录 整局全数据
-            if i % TRACE_INTERVAL == 0:
-                print('Episode: ', i, ' Reward: ', '%.2f' % r, ' Error: ', '%.2f' % error, ' X: ', '%.2f' % s[0], ' Y: ', '%.2f' % s[1], 
-                    ' f1: ', '%.2f' % a[0], ' f2: ', '%.2f' % a[1], ' f3: ', '%.2f' % a[2], ' f4: ', '%.2f' % a[3], ' A_noise: ', '%.4f' % action_noise)
-            # 记录每局的ep_reward
-            if j == MAX_EP_STEPS-1:
-                ep_reward_log.append(int(ep_reward))
-                # print('Episode:', i, ' Reward: %i' % int(ep_reward))
-                # if ep_reward > -300:
-                #     RENDER = Truegit
+        for step in range(MAX_STEP):
+
+            action = agent.get_action_noise(cur_state)
+
+            next_state, reward, done, info = env.step(action)
+
+            # reward = float(reward / 10)
+
+            agent.add_step(cur_state, action, reward, done, next_state)
+            agent.learn_batch()
+
+            info = {
+                "cur_state": list(cur_state), "action": list(action),
+                "next_state": list(next_state), "reward": reward, "done": done
+            }
+            # print(info, flush=True)
+
+            cur_state = next_state
+            cum_reward += reward
+            counter += 1
+            show_reward += reward
+            if counter % 100 == 0:
+                summary_writer.add_scalar('cum_reward', show_reward, counter)
+                show_reward = 0
+
+            if RENDER:
+                env.render()
+                time.sleep(0.1)
+
+            done = done or step == MAX_STEP - 1
+            if done:
+                print(f'episode: {e}, cum_reward: {cum_reward}', flush=True)
+                # if cum_reward < 1:
+                #     RENDER = True
                 break
-        
-        if save_model == True:
-            # 记录ep_reward最大的最优对局局次,保存此时的模型参数
-            if ep_reward >= best_ep_r and ddpg.mem_size > MAX_MEM // 10:
-                best_ep_r = ep_reward
-                best_ep = i
-                ddpg.save_beat_model_param(best_ep)
-                if i == (MAX_EPISODES+load_model_episode-1):
-                    torch.save(ddpg.best_model, 'models/best %i Episode.pth' % best_ep)
-            # 每MODEL_INTERVAL局 保存模型参数
-            if (i+1) % MODEL_INTERVAL == 0 :
-                ddpg.save_model(i+1)
-        
-        # 训练：每局训练10次
-        if ddpg.mem_size > MAX_MEM // 10:
-            for k in range(10):
-                td_error, loss_a = ddpg.learn()
-                ddpg.noise_decay_rate *= NOISE_DECAY    #开始训练之后，每次训练后噪声衰减一次
-                # 记录每步学习的loss,每局10个记录点
-                ddpg.summary_writer.add_scalar('td_error', td_error, k+10*i)
-                ddpg.summary_writer.add_scalar('loss_a', loss_a, k+10*i)
-                # ddpg.summary_writer.add_histogram('Actor_eval/')
+        # summary_writer.add_scalar('cum_reward', cum_reward, e)
+        agent.save(e)  # 保存网络参数
 
-        # 每REWARD_INTERVAL局 计算平均单步reward，tensorboard可视化
-        if (i+1) % REWARD_INTERVAL ==0:
-            ddpg.summary_writer.add_scalar('reward', ep_reward_tb/(REWARD_INTERVAL), i)
-            ep_reward_tb = 0
-
-    json_str = json.dumps(ep_reward_log)
-    with open('ep_reward_log.json', 'w') as json_file:
-        json_file.write(json_str)
 
 if __name__ == '__main__':
-    rl_loop(save_model=False)
-
-    
+    rl_loop(False)
