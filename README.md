@@ -9,9 +9,8 @@
 - 需要安装的相关依赖包：numpy、matplotlib、tensorboard、gym
 
 注意：
-```
 - Windows系统下，如使用pip install gym时出现如下类似错误:No module named pip...,采用如下方法解决。首先输入：python -m ensurepip，得到pip的setuptools，然后输入：easy_install pip，下载相应版本的pip，最后就可以愉快的用pip命令了！
-```
+
 - 在Linux下运行需设置`c_env`文件夹下`step.py`文件中调用的动态链接库为`Sim.so`; Win下运行则设置为`Sim.dll`
 ```
 sim = CDLL('./Sim.so')    # Win下运行设置为.dll
